@@ -1,0 +1,74 @@
+# This workflow will build a docker container, publish it to Azure Container Registry, and deploy it to Azure Kubernetes Service.
+#
+# To configure this workflow:
+# 1. Set up the following secrets in your workspace: 
+#     a. REGISTRY_USERNAME with ACR username
+#     b. REGISTRY_PASSWORD with ACR Password
+#     c. AZURE_CREDENTIALS with the output of `az ad sp create-for-rbac --sdk-auth`
+#
+# 2. Change the values for the REGISTRY_NAME, CLUSTER_NAME, CLUSTER_RESOURCE_GROUP and NAMESPACE environment variables (below).
+
+name: ASH Test - Build docker container, publish to ACR, and deploy to AKS
+on: [push]
+
+# Environment variables available to all jobs and steps in this workflow
+env:
+  ACR_NAME: ghactionsacr
+  NAMESPACE: default
+  AZURE_KUBERNETES_APP_PACKAGE_PATH: SampleKubernetesApp
+  
+jobs:
+  build:
+    runs-on: rakku-wd
+    steps:
+
+    - name: Checkout Sample Kubernetes App repo
+      uses: actions/checkout@v2
+      with:
+        repository: Azure-Samples/azure-voting-app-redis
+        path: ${{ env.AZURE_KUBERNETES_APP_PACKAGE_PATH }}
+    
+    # Connect to Azure Container registry (ACR)
+    - uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.ACR_NAME }}.azurecr.io
+        username: ${{ secrets.ACR_USERNAME }} 
+        password: ${{ secrets.ACR_PASSWORD }}
+    
+    # Container build and push to a Azure Container registry (ACR)
+    - run: |
+        docker-compose up -d
+        docker-compose down
+        docker tag mcr.microsoft.com/azuredocs/azure-vote-front:v1 ${{ env.ACR_NAME }}.azurecr.io/azure-vote-front:v1
+        docker push ${{ env.ACR_NAME }}.azurecr.io/azure-vote-front:v1
+    
+    # Set the target Azure Kubernetes Service (AKS) cluster. 
+    - uses: azure/k8s-set-context@v1
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.ASH_KUBECONFIG }}  # Use secret (https://developer.github.com/actions/managing-workflows/storing-secrets/)
+      id: setcontext
+    
+    # Create namespace if doesn't exist
+    - run: |
+        kubectl create namespace ${{ env.NAMESPACE }} --dry-run -o json | kubectl apply -f -
+    
+    # Create imagepullsecret for Azure Container registry (ACR)
+    - uses: azure/k8s-create-secret@v1
+      with:
+        container-registry-url: ${{ env.ACR_NAME }}.azurecr.io
+        container-registry-username: ${{ secrets.ACR_USERNAME }}
+        container-registry-password: ${{ secrets.ACR_PASSWORD }}
+        secret-name: ${{ env.ACR_NAME }}-registry-connection
+        namespace: ${{ env.NAMESPACE }}
+    
+    # Deploy app to AKS
+    - uses: azure/k8s-deploy@v1
+      with:
+        manifests: |
+          azure-vote-all-in-one-redis.yaml
+        images: |
+          ${{ env.ACR_NAME }}.azurecr.io/azure-vote-front:v1
+        imagepullsecrets: |
+          ${{ env.ACR_NAME }}-registry-connection
+        namespace: ${{ env.NAMESPACE }}
