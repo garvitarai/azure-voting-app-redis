@@ -22,20 +22,6 @@ jobs:
     steps:
     - uses: actions/checkout@master
     
-    # Connect to Azure Container registry (ACR)
-    - uses: azure/docker-login@v1
-      with:
-        login-server: ${{ env.REGISTRY_NAME }}.azurecr.io
-        username: ${{ secrets.REGISTRY_USERNAME }} 
-        password: ${{ secrets.REGISTRY_PASSWORD }}
-    
-    # Container build and push to a Azure Container registry (ACR)
-    - run: |
-        docker-compose up -d
-        docker-compose down
-        docker tag mcr.microsoft.com/azuredocs/azure-vote-front:v1 ${{ env.REGISTRY_NAME }}.azurecr.io/azure-vote-front:v1
-        docker push ${{ env.REGISTRY_NAME }}.azurecr.io/azure-vote-front:v1
-    
     # Set the target Azure Kubernetes Service (AKS) cluster. 
     - uses: azure/k8s-set-context@v1
       with:
